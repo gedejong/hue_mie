@@ -42,12 +42,6 @@ fn kelvin_to_mired(kelvin: f64) -> f64 {
     1_000_000_f64 / kelvin
 }
 
-mod f32_extra {
-    pub fn is_close(left: f32, right: f32) -> bool {
-        (left - right).abs() < 0.02_f32
-    }
-}
-
 mod i16_extra {
     pub fn diff(left: u16, right: u16) -> u16 {
         if left > right {
@@ -82,49 +76,43 @@ fn scene_is_active(bridge: &Bridge, scene: &Scene) -> bool {
             false
         } else {
             let light = bridge.get_light(*id).unwrap();
+            debug!("Light: {:?}", light);
+            debug!("Scene: {:?}", ls);
             let tl = &(light.state);
             b && ls.bri.map_or(true, |b| i8_extra::is_close(b, tl.bri))
                 && tl.ct.map_or(true, |c1| {
                     ls.ct.map_or(true, |c2| i16_extra::is_close(c1, c2))
                 })
-                && tl.hue.map_or(true, |h1| {
-                    ls.hue.map_or(true, |h2| i16_extra::is_close(h1, h2))
-                })
                 && Some(tl.on) == ls.on
-                && tl.sat.map_or(true, |s1| {
-                    ls.sat.map_or(true, |s2| i8_extra::is_close(s1, s2))
-                })
-                && tl.xy.map_or(true, |x1| {
-                    ls.xy.map_or(true, |x2| {
-                        f32_extra::is_close(x1.0, x2.0) && f32_extra::is_close(x1.1, x2.1)
-                    })
-                })
         }
     })
 }
 
 fn update_scene(bridge: &Bridge, id: &str, scene: &Scene, light_target: &LightTarget) {
     for (light, state) in scene.lightstates.iter() {
-        let mut ls: LightStateChange = state.clone();
+        match scene.lights.binary_search(&light) {
+            Ok(idx) => {
+                let mut ls: LightStateChange = state.clone();
 
-        ls.transitiontime = Some(150);
-        let idx: usize = scene.lights.binary_search(&light).unwrap();
-        let this_light_target =
-            light_target.rotate(((idx as f64) / (scene.lights.len() as f64)) * PI * 2.);
-        ls.bri = Some(this_light_target.bri());
-        ls.ct = Some(this_light_target.ct());
-        ls.on = Some(this_light_target.on());
-        match bridge.set_light_state_in_scene(&id, *light, &ls) {
-            Ok(_vec) => {
-                // Do nothing
+                ls.transitiontime = Some(150);
+                let rotation = ((idx as f64) / (scene.lights.len() as f64)) * PI * 2.;
+                let this_light_target = light_target.clone().rotate(rotation);
+                info!("Light target for {:?}: {:?}", light, this_light_target);
+                ls.bri = Some(this_light_target.bri());
+                ls.ct = Some(this_light_target.ct());
+                ls.on = Some(this_light_target.on());
+                info!("Light state for {:?} : {:?}", light, ls);
+                match bridge.set_light_state_in_scene(&id, *light, &ls) {
+                    Ok(_vec) => {
+                        // Do nothing
+                    }
+                    Err(err) => error!("Could not set light state {:?} in scene id {:?}: {}", ls, id, err),
+                }
             }
-            Err(err) => error!(
-                "Could not set light state {:?} in scene id {:?}: {}",
-                ls, id, err
-            ),
+            Err(err) => error!("Could not find light {:?}: {}", light, err)
         }
     }
-    thread::sleep(time::Duration::from_millis(100));
+    //thread::sleep(time::Duration::from_millis(100));
 }
 
 #[derive(Clone, Debug)]
@@ -161,17 +149,17 @@ impl LightTarget {
         let now = Local::now();
         let seconds_from_midnight = now.num_seconds_from_midnight();
 
-        info!("Apparent altitude: {:5}", sun_altitude.to_degrees());
+        debug!("Apparent altitude: {:5}", sun_altitude.to_degrees());
         LightTarget {
             bri: LightTarget::target_brightness(transitions, sun_altitude, now.hour() as u8),
             mired: kelvin_to_mired(LightTarget::target_color_temperature(
                 transitions,
                 sun_altitude,
             )),
-            bri_phase: f64::from(seconds_from_midnight) * 2.0 * PI
-                / transitions.brightness_cycle_length,
-            mired_phase: f64::from(seconds_from_midnight) * 2.0 * PI
-                / transitions.temperature_cycle_length,
+            bri_phase: (f64::from(seconds_from_midnight) * 2.0 * PI
+                / transitions.brightness_cycle_length) % (2.0 * PI),
+            mired_phase: (f64::from(seconds_from_midnight) * 2.0 * PI
+                / transitions.temperature_cycle_length) % (2.0 * PI),
             bri_amplitude: transitions.brightness_cycle_amplitude,
             mired_amplitude: transitions.temperature_cycle_amplitude,
         }
@@ -179,19 +167,19 @@ impl LightTarget {
 
     pub fn rotate(self: &LightTarget, angle: f64) -> LightTarget {
         let mut c = self.clone();
-        c.bri_phase += angle;
-        c.mired_phase += angle;
+        c.bri_phase = (c.bri_phase + angle) % (PI * 2.);
+        c.mired_phase = (c.mired_phase + angle) % (PI * 2.);
         c
     }
 
     pub fn ct(self: &LightTarget) -> u16 {
-        (self.mired_phase.sin() * 50. + self.mired)
+        (self.mired_phase.cos() * self.mired_amplitude + self.mired)
             .max(0.)
             .min(65535.) as u16
     }
 
     pub fn bri(self: &LightTarget) -> u8 {
-        (self.bri_phase.sin() * 30. + self.bri * 255.)
+        (self.bri_phase.cos() * self.bri_amplitude + self.bri * 255.)
             .max(0.)
             .min(255.) as u8
     }
@@ -205,32 +193,43 @@ fn update_scenes(bridge: &Bridge, scenes: BTreeMap<String, Scene>, light_target:
     scenes
         .iter()
         .filter(|&(_, scene)| scene.name.to_lowercase().contains("dayshift"))
+        .filter(|&(_, scene)| !scene.recycle)
         .for_each(|(scene_id, scene)| {
-            info!("Updating scene {}", scene.name);
-            let s: Scene = bridge.get_scene_with_states(&scene_id).unwrap();
-            update_scene(&bridge, &scene_id, &s, &light_target);
+            debug!("Updating scene {}, scene_id: {}", scene.name, scene_id);
+            match bridge.get_scene_with_states(&scene_id) {
+                Ok(s) => {
+                    let scene_active = scene_is_active(&bridge, &s);
 
-            let scene_active = scene_is_active(&bridge, &s);
-            info!(
-                "Scene {} is {}!",
-                scene.name,
-                if scene_active { "active" } else { "inactive" }
-            );
-            if scene_active {
-                bridge
-                    .get_all_groups()
-                    .unwrap()
-                    .iter()
-                    .filter(|&(_, group)| group.lights == scene.lights)
-                    .for_each(|(group_id, _)| {
-                        debug!("Recall scene {} in group {}", scene_id, group_id);
-                        bridge.recall_scene_in_group(*group_id, &scene_id).unwrap();
-                    })
+                    update_scene(&bridge, &scene_id, &s, &light_target);
+
+                    let sleep_duration = time::Duration::from_millis(150);
+                    thread::sleep(sleep_duration);
+                    info!(
+                        "Scene {} is {}!",
+                        scene.name,
+                        if scene_active { "active" } else { "inactive" }
+                    );
+                    if scene_active {
+                        bridge
+                            .get_all_groups()
+                            .unwrap()
+                            .iter()
+                            .filter(|&(_, group)| group.lights == scene.lights)
+                            .filter(|&(_, group)| !group.recycle.unwrap_or(false))
+                            .for_each(|(group_id, _)| {
+                                debug!("Recall scene {} in group {}", scene_id, group_id);
+                                bridge.recall_scene_in_group(*group_id, &scene_id);
+                            })
+                    }
+                }
+                Err(e) => {
+                    error!("Could not find scene with id {:?}: {}", scene_id, e)
+                }
             }
         });
 }
 
-fn setup_and_get_config() -> Result<Config, Box<std::error::Error>> {
+fn setup_and_get_config() -> Result<Config, Box<dyn std::error::Error>> {
     let mut config = Config::from_file()?.clone();
 
     let hue_config = match config.hue {
@@ -262,7 +261,7 @@ fn main() {
     loop {
         let next_step = SystemTime::now().add(Duration::from_secs(15));
         let light_target = LightTarget::new(&(config.transitions), &(config.location));
-        info!("target: {:?}", light_target);
+        debug!("target: {:?}", light_target);
 
         match bridge.get_all_scenes() {
             Ok(scenes) => update_scenes(&bridge, scenes, &light_target),

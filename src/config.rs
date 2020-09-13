@@ -5,8 +5,6 @@ use philipshue::errors::{BridgeError, HueError, HueErrorKind};
 use std::boxed::Box;
 use std::path::PathBuf;
 
-/// This is what we're going to decode into. Each field is optional, meaning
-/// that it doesn't have to be present in TOML.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
     #[serde(default)]
@@ -51,7 +49,7 @@ pub fn discover() -> Vec<String> {
 */
 
 impl Config {
-    pub fn get_hue_config() -> Result<HueConfig, Box<std::error::Error>> {
+    pub fn get_hue_config() -> Result<HueConfig, Box<dyn std::error::Error>> {
         let ip: String = discover().pop().unwrap();
 
         loop {
@@ -88,21 +86,21 @@ impl Config {
         config_dir
     }
 
-    pub fn from_file() -> Result<Config, Box<std::error::Error>> {
+    pub fn from_file() -> Result<Config, Box<dyn std::error::Error>> {
         Config::parse(Config::path().to_str().unwrap())
     }
 
-    pub fn write_file_to(self: &Config, path: &str) -> Result<(), Box<std::error::Error>> {
+    pub fn write_file_to(self: &Config, path: &str) -> Result<(), Box<dyn std::error::Error>> {
         let str = toml::to_string(self)?;
         std::fs::write(path, str)?;
         Ok(())
     }
 
-    pub fn write_file(self: &Config) -> Result<(), Box<std::error::Error>> {
+    pub fn write_file(self: &Config) -> Result<(), Box<dyn std::error::Error>> {
         self.write_file_to(Config::path().to_str().unwrap())
     }
 
-    pub fn parse(path: &str) -> Result<Config, Box<std::error::Error>> {
+    pub fn parse(path: &str) -> Result<Config, Box<dyn std::error::Error>> {
         println!("Reading path {:?}", path);
         let str = File::open(&path)
             .and_then(|mut file| {

@@ -1,5 +1,5 @@
 [package]
-name = "hue-mie"
+name = "hue-test"
 version = "0.1.0"
 authors = ["Edwin de Jong <edejong@fastmail.fm>"]
 edition = "2018"
@@ -19,4 +19,4 @@ dirs = "1.0.5"
 version = "0.3.3"
 default-features = false
 features = ["unstable", "upnp"]
-path = "../philipshue"
+path = "/Users/dibbeke/src/philipshue"
