@@ -1,0 +1,13 @@
+[Unit]
+AssertPathExists=/usr/bin/hue-test
+
+[Service]
+WorkingDirectory=~
+ExecStart=/usr/bin/hue-test
+Restart=always
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+Alias=hue-test
+WantedBy=default.target

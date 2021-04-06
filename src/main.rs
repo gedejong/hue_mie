@@ -52,7 +52,7 @@ mod i16_extra {
     }
 
     pub fn is_close(left: u16, right: u16) -> bool {
-        diff(left, right) < 40
+        diff(left, right) < 60
     }
 }
 
@@ -66,7 +66,7 @@ mod i8_extra {
     }
 
     pub fn is_close(left: u8, right: u8) -> bool {
-        diff(left, right) < 6
+        diff(left, right) < 15
     }
 }
 
@@ -75,6 +75,7 @@ fn scene_is_active(bridge: &Bridge, scene: &Scene) -> bool {
         if !b {
             false
         } else {
+            debug!("Lightstate: {:?}", ls);
             let light = bridge.get_light(*id).unwrap();
             debug!("Light: {:?}", light);
             debug!("Scene: {:?}", ls);
@@ -94,7 +95,7 @@ fn update_scene(bridge: &Bridge, id: &str, scene: &Scene, light_target: &LightTa
             Ok(idx) => {
                 let mut ls: LightStateChange = state.clone();
 
-                ls.transitiontime = Some(150);
+                ls.transitiontime = Some(15);
                 let rotation = ((idx as f64) / (scene.lights.len() as f64)) * PI * 2.;
                 let this_light_target = light_target.clone().rotate(rotation);
                 info!("Light target for {:?}: {:?}", light, this_light_target);
@@ -202,7 +203,7 @@ fn update_scenes(bridge: &Bridge, scenes: BTreeMap<String, Scene>, light_target:
 
                     update_scene(&bridge, &scene_id, &s, &light_target);
 
-                    let sleep_duration = time::Duration::from_millis(150);
+                    let sleep_duration = time::Duration::from_millis(250);
                     thread::sleep(sleep_duration);
                     info!(
                         "Scene {} is {}!",
@@ -214,11 +215,17 @@ fn update_scenes(bridge: &Bridge, scenes: BTreeMap<String, Scene>, light_target:
                             .get_all_groups()
                             .unwrap()
                             .iter()
-                            .filter(|&(_, group)| group.lights == scene.lights)
-                            .filter(|&(_, group)| !group.recycle.unwrap_or(false))
+                            .filter(|&(_, group)| group.lights.clone().sort() == scene.lights.clone().sort())
                             .for_each(|(group_id, _)| {
                                 debug!("Recall scene {} in group {}", scene_id, group_id);
-                                bridge.recall_scene_in_group(*group_id, &scene_id);
+                                match bridge.recall_scene_in_group(*group_id, &scene_id) {
+                                    Ok(_) => {
+                                        info!("Recalled scene with id {:?}", scene_id)
+                                    }
+                                    Err(e) => {
+                                        error!("Could not recall scene with id {:?}: {}", scene_id, e)
+                                    }
+                                }
                             })
                     }
                 }

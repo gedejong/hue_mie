@@ -19,4 +19,21 @@ dirs = "1.0.5"
 version = "0.3.3"
 default-features = false
 features = ["unstable", "upnp"]
-path = "/Users/dibbeke/src/philipshue"
+path = "/home/pi/philipshue"
+
+[[bin]]
+name = "hue-test"
+test = false
+bench = false
+
+[package.metadata.deb]
+depends = "$auto, systemd"
+extended-description = "hue-test"
+section = "admin"
+priority = "optional"
+assets = [
+    ["target/release/hue-test", "usr/bin/hue-test", "755"],
+    ["debian/hue-test.service", "/lib/systemd/system/hue-test.service", "644"], 
+]
+maintainer-scripts = "debian/scripts"
+
